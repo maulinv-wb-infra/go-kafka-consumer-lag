@@ -45,14 +45,13 @@ func NewConsumptionLagTracker(maxMins int, minuteLagChan chan<- MinuteLagMetric)
 	}
 }
 
-// RecordAndMinuteAvgLag records one consumed record: computes consumption lag
-// (now - recTimestamp) in ms, buckets by current minute, and returns the lag
-// for this record and the average lag in ms for the current minute.
+// RecordLag records one consumed record: computes consumption lag (now - recTimestamp)
+// in ms, buckets by current minute, and returns the lag for this record.
 // On minute rollover, if MinuteLagChan is set, sends the previous minute's
 // average lag (non-blocking).
-func (c *ConsumptionLagTracker) RecordAndMinuteAvgLag(recTimestamp time.Time) (lagMs int64, avgLagMsThisMinute float64) {
+func (c *ConsumptionLagTracker) RecordLag(recTimestamp time.Time) int64 {
 	now := nowFunc()
-	lagMs = now.Sub(recTimestamp).Milliseconds()
+	lagMs := now.Sub(recTimestamp).Milliseconds()
 	minute := now.Truncate(time.Minute)
 
 	c.mu.Lock()
@@ -79,7 +78,6 @@ func (c *ConsumptionLagTracker) RecordAndMinuteAvgLag(recTimestamp time.Time) (l
 	b := c.minutes[minute]
 	b.sumLagMs += lagMs
 	b.count++
-	avgLagMsThisMinute = float64(b.sumLagMs) / float64(b.count)
 
 	if c.maxMins > 0 {
 		cutoff := minute.Add(-time.Duration(c.maxMins) * time.Minute)
@@ -91,22 +89,5 @@ func (c *ConsumptionLagTracker) RecordAndMinuteAvgLag(recTimestamp time.Time) (l
 	}
 	c.mu.Unlock()
 
-	return lagMs, avgLagMsThisMinute
-}
-
-// AvgLagMsPerMinute returns the overall average consumption lag in milliseconds
-// across all retained minute buckets (each minute contributes one average).
-func (c *ConsumptionLagTracker) AvgLagMsPerMinute() float64 {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if len(c.minutes) == 0 {
-		return 0
-	}
-	var totalAvg float64
-	for _, b := range c.minutes {
-		if b.count > 0 {
-			totalAvg += float64(b.sumLagMs) / float64(b.count)
-		}
-	}
-	return totalAvg / float64(len(c.minutes))
+	return lagMs
 }

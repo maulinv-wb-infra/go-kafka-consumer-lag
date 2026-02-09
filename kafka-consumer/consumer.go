@@ -39,8 +39,8 @@ func Run(ctx context.Context, minuteLagChan chan<- MinuteLagMetric) {
 		iter := fetches.RecordIter()
 		for !iter.Done() {
 			rec := iter.Next()
-			lagMs, avgLagMsThisMin := lagTracker.RecordAndMinuteAvgLag(rec.Timestamp)
-			fmt.Printf("msg %q | lag %d ms | this minute avg lag %.2f ms\n", rec.Value, lagMs, avgLagMsThisMin)
+			lagMs := lagTracker.RecordLag(rec.Timestamp)
+			fmt.Printf("msg %q | lag %d ms\n", rec.Value, lagMs)
 		}
 	}
 }
