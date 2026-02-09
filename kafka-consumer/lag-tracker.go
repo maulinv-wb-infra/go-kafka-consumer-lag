@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// nowFunc is used for time in the tracker; tests can override for deterministic behavior.
+var nowFunc = time.Now
+
 // MinuteLagMetric is emitted on minute rollover with the average consumption
 // lag (ms) for the minute that just ended.
 type MinuteLagMetric struct {
@@ -48,7 +51,7 @@ func NewConsumptionLagTracker(maxMins int, minuteLagChan chan<- MinuteLagMetric)
 // On minute rollover, if MinuteLagChan is set, sends the previous minute's
 // average lag (non-blocking).
 func (c *ConsumptionLagTracker) RecordAndMinuteAvgLag(recTimestamp time.Time) (lagMs int64, avgLagMsThisMinute float64) {
-	now := time.Now()
+	now := nowFunc()
 	lagMs = now.Sub(recTimestamp).Milliseconds()
 	minute := now.Truncate(time.Minute)
 
