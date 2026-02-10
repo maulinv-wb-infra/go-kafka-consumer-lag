@@ -40,7 +40,7 @@ func Run(ctx context.Context, minuteLagChan chan<- MinuteLagMetric) {
 		for !iter.Done() {
 			rec := iter.Next()
 			lagMs := lagTracker.RecordLag(rec.Timestamp, rec.Topic, rec.Partition)
-			fmt.Printf("msg %q | lag %d ms\n", rec.Value, lagMs)
+			fmt.Printf("msg %q | partition %d | lag %d ms\n", rec.Value, rec.Partition, lagMs)
 		}
 	}
 }

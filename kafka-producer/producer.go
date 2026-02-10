@@ -30,13 +30,13 @@ func main() {
 			Value:     []byte(payload),
 			Timestamp: time.Now(),
 		}
-		cl.Produce(ctx, record, func(_ *kgo.Record, err error) {
+		cl.Produce(ctx, record, func(r *kgo.Record, err error) {
 			if err != nil {
 				fmt.Printf("produce error: %v\n", err)
 				return
 			}
+			fmt.Printf("produced %q | partition %d\n", r.Value, r.Partition)
 		})
-		fmt.Printf("produced %q\n", payload)
 		time.Sleep(2000 * time.Millisecond) // e.g. 1 msg/2 sec; adjust as needed
 	}
 }
