@@ -18,8 +18,8 @@ func main() {
 	minuteLagChan := make(chan kafkaconsumer.MinuteLagMetric, 10)
 	go func() {
 		for m := range minuteLagChan {
-			log.Printf("minute rollover metric: minute=%s topic=%s partition=%d avg_lag_ms=%.2f count=%d",
-				m.Minute.Format("2006-01-02T15:04"), m.Topic, m.Partition, m.AvgLagMs, m.Count)
+			log.Printf("minute rollover metric: minute=%s consumer_group=%s topic=%s partition=%d avg_lag_ms=%.2f count=%d",
+				m.Minute.Format("2006-01-02T15:04"), m.ConsumerGroup, m.Topic, m.Partition, m.AvgLagMs, m.Count)
 		}
 	}()
 

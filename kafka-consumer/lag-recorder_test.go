@@ -7,19 +7,37 @@ import (
 	"time"
 )
 
-func TestNewConsumptionLagTracker(t *testing.T) {
-	tracker := NewConsumptionLagTracker(0, nil)
-	if tracker == nil {
-		t.Fatal("NewConsumptionLagTracker returned nil")
+func TestNewConsumptionLagRecorder(t *testing.T) {
+	recorder := NewConsumptionLagRecorder(0, "test-group", nil)
+	if recorder == nil {
+		t.Fatal("NewConsumptionLagRecorder returned nil")
 	}
-	if tracker.maxMins != 0 {
-		t.Errorf("maxMins = %d, want 0", tracker.maxMins)
+	if recorder.maxMins != 0 {
+		t.Errorf("maxMins = %d, want 0", recorder.maxMins)
 	}
 
-	trackerWithChan := NewConsumptionLagTracker(5, make(chan MinuteLagMetric, 1))
-	if trackerWithChan == nil || trackerWithChan.maxMins != 5 {
-		t.Errorf("expected maxMins 5, got %d", trackerWithChan.maxMins)
+	recorderWithChan := NewConsumptionLagRecorder(5, "test-group", make(chan MinuteLagMetric, 1))
+	if recorderWithChan == nil || recorderWithChan.maxMins != 5 {
+		t.Errorf("expected maxMins 5, got %d", recorderWithChan.maxMins)
 	}
+}
+
+func TestNewConsumptionLagRecorder_PanicsOnEmptyConsumerGroup(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for empty consumerGroup")
+		}
+	}()
+	NewConsumptionLagRecorder(0, "", nil)
+}
+
+func TestNewConsumptionLagRecorder_PanicsOnWhitespaceOnlyConsumerGroup(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for whitespace-only consumerGroup")
+		}
+	}()
+	NewConsumptionLagRecorder(0, "   ", nil)
 }
 
 func TestRecordLag_SingleRecord(t *testing.T) {
@@ -27,10 +45,10 @@ func TestRecordLag_SingleRecord(t *testing.T) {
 	nowFunc = func() time.Time { return base }
 	defer func() { nowFunc = time.Now }()
 
-	tracker := NewConsumptionLagTracker(0, nil)
+	recorder := NewConsumptionLagRecorder(0, "test-group", nil)
 	recTs := base.Add(-100 * time.Millisecond)
 
-	lagMs := tracker.RecordLag(recTs, "foo", 0)
+	lagMs := recorder.RecordLag(recTs, "foo", 0)
 
 	if lagMs != 100 {
 		t.Errorf("lagMs = %d, want 100", lagMs)
@@ -42,19 +60,19 @@ func TestRecordLag_MultipleRecordsSameMinuteSameTopicPartition(t *testing.T) {
 	nowFunc = func() time.Time { return base }
 	defer func() { nowFunc = time.Now }()
 
-	tracker := NewConsumptionLagTracker(0, nil)
+	recorder := NewConsumptionLagRecorder(0, "test-group", nil)
 
-	lag1 := tracker.RecordLag(base.Add(-100*time.Millisecond), "foo", 0)
+	lag1 := recorder.RecordLag(base.Add(-100*time.Millisecond), "foo", 0)
 	if lag1 != 100 {
 		t.Errorf("first record: lag1=%d, want 100", lag1)
 	}
 
-	lag2 := tracker.RecordLag(base.Add(-200*time.Millisecond), "foo", 0)
+	lag2 := recorder.RecordLag(base.Add(-200*time.Millisecond), "foo", 0)
 	if lag2 != 200 {
 		t.Errorf("second record: lag2=%d, want 200", lag2)
 	}
 
-	lag3 := tracker.RecordLag(base.Add(-300*time.Millisecond), "foo", 0)
+	lag3 := recorder.RecordLag(base.Add(-300*time.Millisecond), "foo", 0)
 	if lag3 != 300 {
 		t.Errorf("third record: lag3=%d, want 300", lag3)
 	}
@@ -66,18 +84,21 @@ func TestRecordLag_MinuteRolloverSendsMetric(t *testing.T) {
 	nowFunc = func() time.Time { return now }
 	defer func() { nowFunc = time.Now }()
 
-	tracker := NewConsumptionLagTracker(10, metricChan)
+	recorder := NewConsumptionLagRecorder(10, "my-group", metricChan)
 
 	now = time.Date(2025, 2, 9, 14, 30, 0, 0, time.UTC)
-	tracker.RecordLag(now.Add(-50*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-50*time.Millisecond), "foo", 0)
 
 	now = time.Date(2025, 2, 9, 14, 31, 0, 0, time.UTC)
-	tracker.RecordLag(now.Add(-10*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-10*time.Millisecond), "foo", 0)
 
 	select {
 	case m := <-metricChan:
 		if !m.Minute.Equal(time.Date(2025, 2, 9, 14, 30, 0, 0, time.UTC)) {
 			t.Errorf("metric Minute = %v, want 14:30", m.Minute)
+		}
+		if m.ConsumerGroup != "my-group" {
+			t.Errorf("metric ConsumerGroup = %q, want my-group", m.ConsumerGroup)
 		}
 		if m.Topic != "foo" || m.Partition != 0 {
 			t.Errorf("metric Topic=%q Partition=%d, want foo 0", m.Topic, m.Partition)
@@ -94,16 +115,16 @@ func TestRecordLag_MinuteRolloverSendsMetric(t *testing.T) {
 }
 
 func TestRecordLag_NoMetricWhenChannelNil(t *testing.T) {
-	tracker := NewConsumptionLagTracker(10, nil)
+	recorder := NewConsumptionLagRecorder(10, "test-group", nil)
 
 	base := time.Date(2025, 2, 9, 14, 30, 0, 0, time.UTC)
 	nowFunc = func() time.Time { return base }
 	defer func() { nowFunc = time.Now }()
 
-	tracker.RecordLag(base.Add(-50*time.Millisecond), "foo", 0)
+	recorder.RecordLag(base.Add(-50*time.Millisecond), "foo", 0)
 
 	nowFunc = func() time.Time { return base.Add(time.Minute) }
-	tracker.RecordLag(base.Add(time.Minute-10*time.Millisecond), "foo", 0)
+	recorder.RecordLag(base.Add(time.Minute-10*time.Millisecond), "foo", 0)
 }
 
 func TestRecordLag_NonBlockingWhenChannelFull(t *testing.T) {
@@ -112,15 +133,15 @@ func TestRecordLag_NonBlockingWhenChannelFull(t *testing.T) {
 	nowFunc = func() time.Time { return now }
 	defer func() { nowFunc = time.Now }()
 
-	tracker := NewConsumptionLagTracker(10, metricChan)
+	recorder := NewConsumptionLagRecorder(10, "test-group", metricChan)
 
 	now = time.Date(2025, 2, 9, 14, 30, 0, 0, time.UTC)
-	tracker.RecordLag(now.Add(-1*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-1*time.Millisecond), "foo", 0)
 	now = time.Date(2025, 2, 9, 14, 31, 0, 0, time.UTC)
-	tracker.RecordLag(now.Add(-1*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-1*time.Millisecond), "foo", 0)
 
 	now = time.Date(2025, 2, 9, 14, 32, 0, 0, time.UTC)
-	tracker.RecordLag(now.Add(-1*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-1*time.Millisecond), "foo", 0)
 
 	_, ok := <-metricChan
 	if !ok {
@@ -139,14 +160,14 @@ func TestRecordLag_MultipleTopicPartitionsEmitSeparateMetrics(t *testing.T) {
 	nowFunc = func() time.Time { return now }
 	defer func() { nowFunc = time.Now }()
 
-	tracker := NewConsumptionLagTracker(10, metricChan)
+	recorder := NewConsumptionLagRecorder(10, "test-group", metricChan)
 
 	now = time.Date(2025, 2, 9, 14, 30, 0, 0, time.UTC)
-	tracker.RecordLag(now.Add(-50*time.Millisecond), "foo", 0)
-	tracker.RecordLag(now.Add(-100*time.Millisecond), "bar", 1)
+	recorder.RecordLag(now.Add(-50*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-100*time.Millisecond), "bar", 1)
 
 	now = time.Date(2025, 2, 9, 14, 31, 0, 0, time.UTC)
-	tracker.RecordLag(now.Add(-10*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-10*time.Millisecond), "foo", 0)
 
 	metrics := make(map[string]MinuteLagMetric)
 	for i := 0; i < 2; i++ {
@@ -171,15 +192,15 @@ func TestRecordLag_MultipleTopicPartitionsEmitSeparateMetrics2(t *testing.T) {
 	nowFunc = func() time.Time { return now }
 	defer func() { nowFunc = time.Now }()
 
-	tracker := NewConsumptionLagTracker(10, metricChan)
+	recorder := NewConsumptionLagRecorder(10, "test-group", metricChan)
 
 	now = time.Date(2025, 2, 9, 14, 30, 0, 0, time.UTC)
-	tracker.RecordLag(now.Add(-50*time.Millisecond), "foo", 0)
-	tracker.RecordLag(now.Add(-150*time.Millisecond), "foo", 0)
-	tracker.RecordLag(now.Add(-100*time.Millisecond), "bar", 1)
+	recorder.RecordLag(now.Add(-50*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-150*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-100*time.Millisecond), "bar", 1)
 
 	now = time.Date(2025, 2, 9, 14, 31, 0, 0, time.UTC)
-	tracker.RecordLag(now.Add(-10*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-10*time.Millisecond), "foo", 0)
 
 	metrics := make(map[string]MinuteLagMetric)
 	for i := 0; i < 2; i++ {
@@ -203,13 +224,13 @@ func TestRecordLag_MaxMinsEvictsOldBuckets(t *testing.T) {
 	nowFunc = func() time.Time { return base }
 	defer func() { nowFunc = time.Now }()
 
-	tracker := NewConsumptionLagTracker(2, nil)
+	recorder := NewConsumptionLagRecorder(2, "test-group", nil)
 
-	tracker.RecordLag(base.Add(-10*time.Millisecond), "foo", 0)
+	recorder.RecordLag(base.Add(-10*time.Millisecond), "foo", 0)
 	nowFunc = func() time.Time { return base.Add(1 * time.Minute) }
-	tracker.RecordLag(base.Add(1*time.Minute-10*time.Millisecond), "foo", 0)
+	recorder.RecordLag(base.Add(1*time.Minute-10*time.Millisecond), "foo", 0)
 	nowFunc = func() time.Time { return base.Add(2 * time.Minute) }
-	lagMs := tracker.RecordLag(base.Add(2*time.Minute-10*time.Millisecond), "foo", 0)
+	lagMs := recorder.RecordLag(base.Add(2*time.Minute-10*time.Millisecond), "foo", 0)
 
 	if lagMs != 10 {
 		t.Errorf("lagMs = %d, want 10", lagMs)
@@ -222,14 +243,14 @@ func TestRecordLag_AverageLagInMetric(t *testing.T) {
 	nowFunc = func() time.Time { return now }
 	defer func() { nowFunc = time.Now }()
 
-	tracker := NewConsumptionLagTracker(10, metricChan)
+	recorder := NewConsumptionLagRecorder(10, "test-group", metricChan)
 
 	now = time.Date(2025, 2, 9, 14, 30, 0, 0, time.UTC)
-	tracker.RecordLag(now.Add(-100*time.Millisecond), "foo", 0)
-	tracker.RecordLag(now.Add(-200*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-100*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-200*time.Millisecond), "foo", 0)
 
 	now = time.Date(2025, 2, 9, 14, 31, 0, 0, time.UTC)
-	tracker.RecordLag(now.Add(-10*time.Millisecond), "foo", 0)
+	recorder.RecordLag(now.Add(-10*time.Millisecond), "foo", 0)
 
 	m := <-metricChan
 	if m.Count != 2 {
@@ -245,14 +266,14 @@ func TestConcurrentRecordLag(t *testing.T) {
 	nowFunc = func() time.Time { return base }
 	defer func() { nowFunc = time.Now }()
 
-	tracker := NewConsumptionLagTracker(0, nil)
+	recorder := NewConsumptionLagRecorder(0, "test-group", nil)
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(j int) {
 			defer wg.Done()
 			recTs := base.Add(-time.Duration(j*10) * time.Millisecond)
-			tracker.RecordLag(recTs, "foo", 0)
+			recorder.RecordLag(recTs, "foo", 0)
 		}(i)
 	}
 	wg.Wait()
